@@ -4,7 +4,7 @@ Every plugin [Crook](https://github.com/theguriev/crook) can offer, built from s
 published as one static file.
 
 ```
-https://theguriev.github.io/crook-plugins/index.json
+https://github.com/theguriev/crook-plugins/releases/download/index/index.json
 ```
 
 That URL is the whole of the store. There is **no server**: the terminal fetches one JSON file
@@ -69,6 +69,11 @@ here. [`CONTRIBUTING.md`](CONTRIBUTING.md) is the whole of the process.
 cargo install crook_wasm --version '^0.8'  # crook-plugin-info, the reader for ABI 8
 tools/index.py --out build                 # clone, build, read, hash, write index.json
 ```
+
+One release, rewritten in place by CI on `main`, and the tag never moves: that URL is what every
+Crook reads, so it is the one thing here that has to be stable forever. A release rather than a
+published site because a registry should be a repository with a workflow in it and nothing else
+configured — somebody forking this to run their own list changes one line in their Crook.
 
 Until `crook_wasm` is on crates.io the reader comes from a checkout of the terminal —
 `cargo install --path crates/crook_wasm` — and CI says so plainly by failing on

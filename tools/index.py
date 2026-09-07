@@ -48,8 +48,10 @@ def main() -> int:
                         help="where index.json and artifacts/ are written")
     parser.add_argument("--work", default=".work", type=Path,
                         help="where sources are checked out and built")
-    parser.add_argument("--base-url", default="https://theguriev.github.io/crook-plugins",
-                        help="what the artifact URLs are relative to")
+    parser.add_argument(
+        "--base-url",
+        default="https://github.com/theguriev/crook-plugins/releases/download/index",
+        help="where the artifacts will be served from; one name is joined to it")
     parser.add_argument("--reader", default="crook-plugin-info",
                         help="the command that reads a module's manifest")
     parser.add_argument("--only", default=None,
@@ -118,7 +120,7 @@ def one(plugin, entry, arguments, artifacts):
         version = {
             "version": described["version"],
             "abi": described["abi"],
-            "url": f"{arguments.base_url}/artifacts/{name}",
+            "url": f"{arguments.base_url}/{name}",
             "sha256": hashlib.sha256(bytes_).hexdigest(),
             "bytes": len(bytes_),
             "capabilities": described["capabilities"],

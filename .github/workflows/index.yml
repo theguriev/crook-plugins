@@ -22,6 +22,10 @@ jobs:
     name: Build every plugin and write the index
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # The publish step below rewrites one release in place; nothing else here
+    # writes anything.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +46,9 @@ jobs:
         run: cargo install crook_wasm --version '^0.8' --locked
 
       - name: Build the index
-        run: tools/index.py --out build --base-url "https://theguriev.github.io/crook-plugins"
+        run: |
+          tools/index.py --out build \
+            --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/index"
 
       # So a reviewer can see exactly what a pull request will publish before
       # it publishes anything.
@@ -51,22 +57,20 @@ jobs:
           name: index
           path: build/
 
-      - uses: actions/upload-pages-artifact@v3
+      # One release, rewritten in place, and the tag never moves: `index` is
+      # the URL every Crook reads, so it is the one thing here that has to be
+      # stable forever. A release rather than Pages because a registry should
+      # be a repository with a workflow in it and nothing else configured —
+      # somebody forking this to run their own list changes one line in their
+      # Crook, not a site setting.
+      - name: Publish
         if: github.ref == 'refs/heads/main'
-        with:
-          path: build/
-
-  publish:
-    name: Publish
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@v4
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view index --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create index --repo "$GITHUB_REPOSITORY" \
+                 --title "The current index" \
+                 --notes "The list every Crook reads, and the artifacts it names."
+          gh release upload index build/index.json build/artifacts/*.wasm \
+            --repo "$GITHUB_REPOSITORY" --clobber
