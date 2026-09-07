@@ -1,0 +1,10 @@
+schema = 1
+
+id = "theguriev/markdown"
+repository = "https://github.com/theguriev/crook-markdown"
+license = "MIT"
+
+# Newest last. A ref is a commit rather than a tag: what is built is what is
+# indexed, and a tag can be moved.
+[[release]]
+ref = "67a4922d965a79fbfa9b53247a8fdd5735dbf7c3"

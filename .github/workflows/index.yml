@@ -1,0 +1,72 @@
+name: Index
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # One publish at a time, and the last push is the one anybody reads.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build every plugin and write the index
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # The wasm target for the default toolchain. Each plugin's own
+      # `rust-toolchain.toml` may name another one, and `tools/index.py` adds
+      # the target again inside each checkout for exactly that reason.
+      - name: Rust
+        run: |
+          rustup show
+          rustup target add wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Crook's own reader, so that what the index says a plugin is, is what
+      # the terminal will decide it is. The version is the plugin ABI it
+      # reads: `0.8` reads ABI 8.
+      - name: Install crook-plugin-info
+        run: cargo install crook_wasm --version 0.8 --locked
+
+      - name: Build the index
+        run: tools/index.py --out build --base-url "https://theguriev.github.io/crook-plugins"
+
+      # So a reviewer can see exactly what a pull request will publish before
+      # it publishes anything.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: index
+          path: build/
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: build/
+
+  publish:
+    name: Publish
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

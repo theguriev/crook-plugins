@@ -1,0 +1,10 @@
+schema = 1
+
+id = "theguriev/emoji"
+repository = "https://github.com/theguriev/crook-emoji"
+license = "MIT"
+
+# Newest last. A ref is a commit rather than a tag: what is built is what is
+# indexed, and a tag can be moved.
+[[release]]
+ref = "9d40f6fa567574b7bae97ef93b740fcdf3024746"

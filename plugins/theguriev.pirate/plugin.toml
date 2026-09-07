@@ -1,0 +1,10 @@
+schema = 1
+
+id = "theguriev/pirate"
+repository = "https://github.com/theguriev/crook-pirate"
+license = "MIT"
+
+# Newest last. A ref is a commit rather than a tag: what is built is what is
+# indexed, and a tag can be moved.
+[[release]]
+ref = "a20799834a0dd45b91de5357c7904c09f4fd49c5"
