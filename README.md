@@ -66,9 +66,14 @@ here. [`CONTRIBUTING.md`](CONTRIBUTING.md) is the whole of the process.
 ## Building the index yourself
 
 ```sh
-cargo install crook_wasm --version '^0.8'   # crook-plugin-info, the reader for ABI 8
-tools/index.py --out build               # clone, build, read, hash, write build/index.json
+cargo install crook_wasm --version '^0.8'  # crook-plugin-info, the reader for ABI 8
+tools/index.py --out build                 # clone, build, read, hash, write index.json
 ```
+
+Until `crook_wasm` is on crates.io the reader comes from a checkout of the terminal —
+`cargo install --path crates/crook_wasm` — and CI says so plainly by failing on
+`could not find crook_wasm in registry crates-io`. That is the one thing standing between this
+repository and a live index.
 
 `--from <directory>` builds from checkouts you already have instead of cloning, which is how to
 try a `plugin.toml` before pushing it.
