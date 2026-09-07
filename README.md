@@ -66,7 +66,7 @@ here. [`CONTRIBUTING.md`](CONTRIBUTING.md) is the whole of the process.
 ## Building the index yourself
 
 ```sh
-cargo install crook_wasm --version 0.8   # crook-plugin-info, the reader for ABI 8
+cargo install crook_wasm --version '^0.8'   # crook-plugin-info, the reader for ABI 8
 tools/index.py --out build               # clone, build, read, hash, write build/index.json
 ```
 

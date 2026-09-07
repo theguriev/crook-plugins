@@ -39,7 +39,7 @@ jobs:
       # the terminal will decide it is. The version is the plugin ABI it
       # reads: `0.8` reads ABI 8.
       - name: Install crook-plugin-info
-        run: cargo install crook_wasm --version 0.8 --locked
+        run: cargo install crook_wasm --version '^0.8' --locked
 
       - name: Build the index
         run: tools/index.py --out build --base-url "https://theguriev.github.io/crook-plugins"
