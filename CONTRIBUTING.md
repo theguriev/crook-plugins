@@ -24,6 +24,9 @@ version, the ABI and the list of what the plugin asks to be allowed to do are re
 **artifact** by Crook's own reader — so there is nothing here to keep in step with the plugin,
 and nothing a registry entry can say about a plugin that the plugin does not say about itself.
 
+Every one of those is checked before anything is cloned or built, so a pull request that gets
+one wrong fails with a line naming it rather than with something about git.
+
 ## What has to be true
 
 - **`id` is `owner/name`**, lowercase letters, digits, `-` and `_`. The owner is you: the
@@ -34,7 +37,11 @@ and nothing a registry entry can say about a plugin that the plugin does not say
   produces exactly one `.wasm`. Not `wasm32-wasip1`: the sandbox links seven host functions and
   refuses a module that imports anything else.
 - **No binaries in the pull request.** Every artifact is built by CI from the commit you named.
-- **The licence is one CI accepts**, and it is in the repository the entry points at.
+- **The licence is named**, and it is in the repository the entry points at.
+- **The `ref` is a full 40-character commit**, and the `repository` is
+  `https://github.com/<owner>/<name>`. Both of those become git's arguments, and git takes more
+  kinds of thing there than anybody means: `ext::` runs a command, a path clones a directory on
+  the runner, and a tag can be moved after somebody has reviewed what it pointed at.
 
 ## What CI does with it
 

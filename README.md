@@ -46,6 +46,9 @@ the sentence a permission dialog says, and until somebody answers it reaches non
   in the index are read out of the built artifact by `crook-plugin-info`, which is Crook's own
   reader — the same code the terminal decides with. A `plugin.toml` whose id disagrees with the
   module's fails the build.
+- **The index is checked against what the terminal reads.** A row whose id the host cannot
+  parse, a hash it cannot compare, a URL it will not fetch: each of those is a plugin quietly
+  missing from somebody's list, so the build refuses rather than publishing it.
 - **The hash is what was built.** `sha256` catches a truncated download, a moved URL and a stale
   mirror. It is not a signature and nothing here calls it verification: the same run builds the
   artifact and writes the hash.

@@ -3,4 +3,4 @@
 
 # A plugin directory belongs to whoever wrote the plugin: add yourself here in
 # the pull request that adds it.
-/plugins/theguriev.* @theguriev
+/plugins/theguriev.*/ @theguriev
