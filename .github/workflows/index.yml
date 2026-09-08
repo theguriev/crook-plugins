@@ -65,14 +65,30 @@ jobs:
       - name: Build what this pull request changed
         if: github.event_name == 'pull_request'
         run: |
-          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
+          set -eu
+          # `git diff` failing — a base ref that was not fetched — must not
+          # read as "nothing changed", which is a green tick on a build that
+          # never happened.
+          base="origin/${{ github.base_ref }}"
+          git rev-parse --verify --quiet "$base" > /dev/null \
+            || { echo "::error::$base is not here, so what this changed cannot be worked out"; exit 1; }
+          changed=$(git diff --name-only "$base...HEAD" \
             | sed -n 's|^plugins/\([^/]*\)/.*|\1|p' | sort -u)
           if [ -z "$changed" ]; then
             echo "no plugin entry changed; nothing to build"
             exit 0
           fi
           for folder in $changed; do
-            id=$(sed -n 's|^id = "\(.*\)"|\1|p' "plugins/$folder/plugin.toml")
+            # A directory that was *removed* has nothing to build and is not a
+            # failure: the entry is gone, and what that means for the index is
+            # the publish job's business on main.
+            if [ ! -f "plugins/$folder/plugin.toml" ]; then
+              echo "plugins/$folder is gone; nothing to build for it"
+              continue
+            fi
+            id=$(python3 -c "
+          import sys, tomllib
+          print(tomllib.load(open('plugins/$folder/plugin.toml','rb'))['id'])")
             echo "::group::$id"
             tools/index.py --out build --only "$id"
             echo "::endgroup::"
@@ -87,9 +103,31 @@ jobs:
       - name: What is already published
         if: github.event_name != 'pull_request'
         run: |
-          curl --silent --location --fail --output published.json \
-            "https://github.com/$GITHUB_REPOSITORY/releases/download/index/index.json" \
-            || echo "nothing published yet"
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/index/index.json"
+          code=$(curl --silent --location --output published.json --write-out '%{http_code}' "$url")
+          case "$code" in
+            200)
+              # Refuse an index that is not one *here*, rather than carrying
+              # nothing over and rebuilding everything as if the registry had
+              # published nothing.
+              python3 -c "import json,sys; json.load(open('published.json'))"
+              echo "carrying over what is in the published index"
+              ;;
+            404)
+              # The registry has published nothing yet, which is true exactly
+              # once and is the only reason to build everything.
+              rm -f published.json
+              echo "nothing published yet"
+              ;;
+            *)
+              # Anything else is the network, and failing *open* here would
+              # rebuild every published version and clobber the release with
+              # artifacts that hash differently. A run that cannot read the
+              # index does not get to replace it.
+              echo "::error::the published index answered $code; refusing to rebuild what is out there"
+              exit 1
+              ;;
+          esac
 
       - name: Build what is new and write the index
         if: github.event_name != 'pull_request'
