@@ -68,6 +68,23 @@ Add a `[[release]]` with the new commit. Leave the old ones: every version stays
 which is what lets a Crook on an older plugin ABI go on installing the last build that speaks
 it.
 
+## A version that is published is not rebuilt
+
+Adding a `[[release]]` builds a new artifact; changing the `ref` of one that is already in the
+index rebuilds an old one, and **the bytes will not be the same**. That is not a bug in this
+registry, it is what a Rust build is: two runs of the same commit on different toolchain patch
+versions produce different modules. Measured here on the day it was set up — four of six
+artifacts hashed differently between a laptop and CI, from the same commits.
+
+What follows is a rule rather than a warning. A version somebody could already have installed
+keeps the artifact and the hash it was published with; a change to what that version *is* is a
+new version. The `ref` of a release already in the index moves only when nobody could have
+installed it yet.
+
+What the hash is worth, said precisely: the bytes that arrive are the bytes CI built from the
+commit in this file. It is not a claim that anybody else rebuilding that commit gets the same
+bytes, and nothing here has ever said it was.
+
 ## Withdrawing a version
 
 ```toml
