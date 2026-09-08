@@ -78,10 +78,23 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Build every plugin and write the index
+      # What is out there already. A version anybody could have installed keeps
+      # the artifact and the hash it went out with — two builds of one commit
+      # on different toolchain patch versions produce different modules, so a
+      # rebuild is a new artifact under an old version's name, not the same
+      # thing again. Missing, unreadable or a 404 means the registry has
+      # published nothing yet and everything is built.
+      - name: What is already published
         if: github.event_name != 'pull_request'
         run: |
-          tools/index.py --out build \
+          curl --silent --location --fail --output published.json \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/index/index.json" \
+            || echo "nothing published yet"
+
+      - name: Build what is new and write the index
+        if: github.event_name != 'pull_request'
+        run: |
+          tools/index.py --out build --keep published.json \
             --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/index"
 
       # What the publish job will upload, and what a reviewer can look at
@@ -127,7 +140,13 @@ jobs:
             || gh release create index --repo "$GITHUB_REPOSITORY" \
                  --title "The current index" \
                  --notes "The list every Crook reads, and the artifacts it names."
-          gh release upload index build/artifacts/*.wasm \
-            --repo "$GITHUB_REPOSITORY" --clobber
+          # Nothing to upload when every version was carried over, which is
+          # the ordinary run: the artifacts are already up there untouched,
+          # and the index below may still have changed — a withdrawal is a
+          # line in the list and not a new module.
+          if ls build/artifacts/*.wasm >/dev/null 2>&1; then
+            gh release upload index build/artifacts/*.wasm \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          fi
           gh release upload index build/index.json \
             --repo "$GITHUB_REPOSITORY" --clobber

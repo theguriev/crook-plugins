@@ -78,6 +78,9 @@ def main() -> int:
                         help="the command that reads a module's manifest")
     parser.add_argument("--only", default=None,
                         help="build one plugin, by id")
+    parser.add_argument("--keep", default=None, type=Path,
+                        help="an index already published: every version in it is carried over "
+                             "rather than built again")
     parser.add_argument("--from", dest="local", default=None, type=Path,
                         help="a directory of checkouts to build from instead of cloning, "
                              "for trying this before anything is pushed")
@@ -91,6 +94,24 @@ def main() -> int:
     artifacts = arguments.out / "artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
 
+    # What is already published, if this run was given it. A version anybody
+    # could have installed keeps the artifact and the hash it went out with:
+    # two builds of one commit on different toolchain patch versions produce
+    # different modules, so rebuilding is not "the same thing again", it is a
+    # new artifact under an old version's name.
+    kept = {}
+    named = {}
+    if arguments.keep and arguments.keep.exists():
+        for plugin in json.loads(arguments.keep.read_text()).get("plugins", []):
+            named[plugin["id"]] = plugin
+            for version in plugin.get("versions", []):
+                # Keyed by the commit rather than by the version, because that
+                # is what a `plugin.toml` names and what this can compare
+                # before deciding whether to build anything.
+                if "ref" in version:
+                    kept[(plugin["id"], version["ref"])] = version
+        print(f"{len(kept)} versions already published")
+
     listed = []
     for entry in entries:
         try:
@@ -101,7 +122,7 @@ def main() -> int:
         if arguments.only and plugin.get("id") != arguments.only:
             continue
         try:
-            listed.append(one(plugin, entry, arguments, artifacts))
+            listed.append(one(plugin, entry, arguments, artifacts, kept, named))
         except Failed as failure:
             print(f"{entry}: {failure}", file=sys.stderr)
             return 1
@@ -161,7 +182,7 @@ class Failed(Exception):
     """Something a person has to fix in a plugin.toml or in a plugin."""
 
 
-def one(plugin, entry, arguments, artifacts):
+def one(plugin, entry, arguments, artifacts, kept, published):
     """Every release of one plugin, built and described."""
     plugin_id = plugin.get("id")
     if plugin.get("schema") != SCHEMA:
@@ -187,6 +208,19 @@ def one(plugin, entry, arguments, artifacts):
         if not COMMIT.fullmatch(ref):
             raise Failed(f"lists {ref!r}, and a release here is a 40-character commit: what is "
                          "built is what is indexed, and a tag can be moved after it is reviewed")
+
+        # Already out there, so it is carried over rather than built: the
+        # artifact and the hash it went out with are what somebody may already
+        # have installed, and a rebuild of the same commit is a *different*
+        # module under an old version's name. Only what a person can change
+        # without changing the artifact — whether it is withdrawn — is taken
+        # from the file rather than from the index.
+        if (plugin_id, ref) in kept:
+            carried = dict(kept[(plugin_id, ref)])
+            carried["yanked"] = release.get("yanked")
+            versions.append(carried)
+            print(f"  {plugin_id} {carried['version']} (published already)")
+            continue
 
         built = build(plugin, release, arguments)
         described = describe(built, arguments.reader)
@@ -221,8 +255,15 @@ def one(plugin, entry, arguments, artifacts):
         print(f"  {plugin_id} {described['version']} "
               f"(abi {described['abi']}, {len(bytes_)} bytes)")
 
-    if not versions or named is None:
+    if not versions:
         raise Failed("lists no releases")
+
+    # A plugin whose every version was carried over built nothing, so what it
+    # is *called* comes from the index that carried them.
+    if named is None:
+        named = published.get(plugin_id)
+    if named is None:
+        raise Failed("was carried over from an index that does not describe it")
 
     return {
         "id": plugin_id,
