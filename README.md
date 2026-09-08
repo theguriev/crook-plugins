@@ -64,9 +64,10 @@ the sentence a permission dialog says, and until somebody answers it reaches non
 
 ## Adding a plugin
 
-Write one — [`crook_plugin_api`](https://crates.io/crates/crook_plugin_api) is the vocabulary,
-and the four plugins above are worked examples — then open a pull request adding one directory
-here. [`CONTRIBUTING.md`](CONTRIBUTING.md) is the whole of the process.
+Write one — [crook-plugin-template](https://github.com/theguriev/crook-plugin-template) is the
+shortest way in, [`crook_plugin_api`](https://crates.io/crates/crook_plugin_api) is the
+vocabulary, and the plugins above are worked examples — then open a pull request adding one
+directory here. [`CONTRIBUTING.md`](CONTRIBUTING.md) is the whole of the process.
 
 ## Building the index yourself
 
@@ -80,10 +81,9 @@ Crook reads, so it is the one thing here that has to be stable forever. A releas
 published site because a registry should be a repository with a workflow in it and nothing else
 configured — somebody forking this to run their own list changes one line in their Crook.
 
-Until `crook_wasm` is on crates.io the reader comes from a checkout of the terminal —
-`cargo install --path crates/crook_wasm` — and CI says so plainly by failing on
-`could not find crook_wasm in registry crates-io`. That is the one thing standing between this
-repository and a live index.
+`--from <directory>` builds from checkouts you already have instead of cloning, and `--keep
+<index.json>` carries over every version an index already published rather than building it
+again — which is what CI does, and why an ordinary push rebuilds nothing.
 
-`--from <directory>` builds from checkouts you already have instead of cloning, which is how to
-try a `plugin.toml` before pushing it.
+Trying a `plugin.toml` before pushing it is `--only <id>`, which builds that one entry and
+deliberately writes no index.
