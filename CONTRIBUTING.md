@@ -90,9 +90,15 @@ artifacts hashed differently between a laptop and CI, from the same commits.
 
 What follows is a rule rather than a warning, and CI keeps it rather than trusting anybody to:
 every run reads the published index first and **carries over every version already in it**,
-matched by the commit its entry records. Only a release the index has never seen is built. So a
-push that changes nothing but a README rebuilds nothing, and the `ref` of a release already in
-the index can be edited without effect — the artifact and the hash that went out stay out.
+matched by the commit its entry records. Only a release the index has never seen is built, so a
+push that changes nothing but a README rebuilds nothing.
+
+Editing the `ref` of a release that is already published is **refused**, by version: the build
+happens, the version it produces is one the index already has under another commit, and the run
+stops there rather than replacing an artifact somebody may be running with one that hashes
+differently. And a run that cannot *read* the published index stops too — failing open would
+rebuild everything and clobber the lot, which is the same accident with a network blip in front
+of it.
 
 Which means a change to what a version *is* is a new version, and adding one is adding a
 `[[release]]`.
@@ -100,6 +106,13 @@ Which means a change to what a version *is* is a new version, and adding one is 
 What the hash is worth, said precisely: the bytes that arrive are the bytes CI built from the
 commit in this file. It is not a claim that anybody else rebuilding that commit gets the same
 bytes, and nothing here has ever said it was.
+
+## Taking one away is withdrawing it
+
+Deleting a `[[release]]` that is published is refused too, and for the same reason the rebuild
+is: the artifact stays in the release either way, so what deleting the entry actually does is
+make a version disappear from the list without telling anybody who is running it. `yanked` is
+how a version goes away, because it leaves a sentence behind.
 
 ## Withdrawing a version
 

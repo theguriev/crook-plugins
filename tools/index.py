@@ -61,6 +61,12 @@ PLUGIN_ID = re.compile(r"\A[a-z0-9_-]{1,64}/[a-z0-9_-]{1,64}\Z")
 # Lowercase hex, which is what `hashlib` writes and what the terminal compares.
 SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
 
+# What a version may be, because it becomes a filename and then a URL. The
+# terminal is deliberately relaxed about versions — it compares them and prints
+# them — but a release asset named with a `+` in it is served from a URL where
+# `+` means a space, so the store would download something that is not there.
+VERSION = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9.\-_]{0,63}\Z")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -99,7 +105,12 @@ def main() -> int:
     # two builds of one commit on different toolchain patch versions produce
     # different modules, so rebuilding is not "the same thing again", it is a
     # new artifact under an old version's name.
+    # Every version the published index holds, by version as well as by commit:
+    # the commit is what decides whether to build, and the version is what says
+    # "this is already out there under this name" when somebody edits a `ref`
+    # that has already been published.
     kept = {}
+    published_versions = set()
     named = {}
     if arguments.keep and arguments.keep.exists():
         for plugin in json.loads(arguments.keep.read_text()).get("plugins", []):
@@ -108,6 +119,7 @@ def main() -> int:
                 # Keyed by the commit rather than by the version, because that
                 # is what a `plugin.toml` names and what this can compare
                 # before deciding whether to build anything.
+                published_versions.add((plugin["id"], version["version"]))
                 if "ref" in version:
                     kept[(plugin["id"], version["ref"])] = version
         print(f"{len(kept)} versions already published")
@@ -122,7 +134,7 @@ def main() -> int:
         if arguments.only and plugin.get("id") != arguments.only:
             continue
         try:
-            listed.append(one(plugin, entry, arguments, artifacts, kept, named))
+            listed.append(one(plugin, entry, arguments, artifacts, kept, named, published_versions))
         except Failed as failure:
             print(f"{entry}: {failure}", file=sys.stderr)
             return 1
@@ -136,13 +148,17 @@ def main() -> int:
         return 1
 
     index = {"schema": SCHEMA, "plugins": listed}
+    # Checked before the `--only` exit, not after it: a pull request builds one
+    # entry and that is exactly when somebody wants to hear that their row is
+    # not one the terminal can read.
+    check(index)
+
     if arguments.only:
         # One plugin is a build, not an index: publishing this would take every
         # other plugin off the list.
         print(f"built {arguments.only} and wrote no index: --only is for trying one entry")
         return 0
 
-    check(index)
     written = arguments.out / "index.json"
     written.write_text(json.dumps(index, indent=1, sort_keys=False) + "\n")
     print(f"{written}: {len(listed)} plugins, "
@@ -176,13 +192,28 @@ def check(index):
                 raise Failed(f"{where} is {version['bytes']} bytes")
             if not isinstance(version["abi"], int):
                 raise Failed(f"{where} says its ABI is {version['abi']!r}")
+            if version["yanked"] is not None and not isinstance(version["yanked"], str):
+                raise Failed(f"{where} is withdrawn with {version['yanked']!r} rather than a "
+                             "reason, which the terminal cannot read — and an index it cannot "
+                             "read is every plugin missing, not one")
+
+
+def _key(version):
+    """A version, in an order `1.10.0` sorts after `1.9.0` in.
+
+    The same rule `app/src/plugins/wasm/version.rs` follows, and for the same
+    reason: sorting these as text is the one thing that is catastrophically
+    wrong rather than merely surprising.
+    """
+    release = version.split("+")[0].split("-")[0]
+    return [int(part) if part.isdigit() else -1 for part in release.split(".")]
 
 
 class Failed(Exception):
     """Something a person has to fix in a plugin.toml or in a plugin."""
 
 
-def one(plugin, entry, arguments, artifacts, kept, published):
+def one(plugin, entry, arguments, artifacts, kept, published, published_versions):
     """Every release of one plugin, built and described."""
     plugin_id = plugin.get("id")
     if plugin.get("schema") != SCHEMA:
@@ -202,8 +233,13 @@ def one(plugin, entry, arguments, artifacts, kept, published):
         raise Failed("names no licence")
 
     versions = []
-    named = None
+    built = {}
     for release in plugin.get("release", []):
+        yanked = release.get("yanked")
+        if yanked is not None and (not isinstance(yanked, str) or not yanked.strip()):
+            raise Failed(f"withdraws a release with {yanked!r}, and a withdrawal is a *sentence*: "
+                         "it is what somebody already running that version is told")
+
         ref = release.get("ref", "")
         if not COMMIT.fullmatch(ref):
             raise Failed(f"lists {ref!r}, and a release here is a 40-character commit: what is "
@@ -218,12 +254,34 @@ def one(plugin, entry, arguments, artifacts, kept, published):
         if (plugin_id, ref) in kept:
             carried = dict(kept[(plugin_id, ref)])
             carried["yanked"] = release.get("yanked")
+            # Where it is served from is this run's to say, not the old
+            # index's: a fork, or a repository that was renamed, would
+            # otherwise publish a list pointing at the artifacts of the
+            # repository it came from.
+            name = f"{plugin_id.replace('/', '.')}-{carried['version']}.wasm"
+            carried["url"] = f"{arguments.base_url}/{name}"
             versions.append(carried)
             print(f"  {plugin_id} {carried['version']} (published already)")
             continue
 
         built = build(plugin, release, arguments)
         described = describe(built, arguments.reader)
+
+        # Built, and it turns out to be a version that is already published
+        # from a *different* commit — which is what editing a `ref` does. The
+        # artifact out there is what somebody may have installed; this one
+        # would replace it under the same name and a different hash.
+        if (plugin_id, described["version"]) in published_versions:
+            raise Failed(
+                f"builds {described['version']} at {release['ref']}, and {described['version']} "
+                "is already published from another commit. A version that is out there keeps the "
+                "artifact it went out with; a change to what it is is a new version."
+            )
+
+        if not VERSION.fullmatch(described["version"]):
+            raise Failed(f"is version {described['version']!r}, which cannot be a filename and a "
+                         "URL: letters, digits, `.`, `-` and `_`, starting with a letter or a "
+                         "digit")
 
         if described["id"] != plugin_id:
             raise Failed(f"names {plugin_id} and the module at {release['ref']} "
@@ -247,19 +305,40 @@ def one(plugin, entry, arguments, artifacts, kept, published):
             "ref": release["ref"],
         }
         versions.append(version)
-        # The name and the line under it live in a manifest, so they are the
-        # newest built version's rather than the TOML's: a plugin is entitled
-        # to rename itself, and a registry entry must not be able to describe
-        # one as something other than what it says it is.
-        named = described
+        # The name and the line under it live in a manifest, so they are a
+        # *version's* rather than the TOML's: a plugin is entitled to rename
+        # itself, and a registry entry must not be able to describe one as
+        # something other than what it says it is. Which version is settled
+        # after the loop, because releases are listed in whatever order
+        # somebody wrote them and carried-over ones are not built at all.
+        built[described["version"]] = described
         print(f"  {plugin_id} {described['version']} "
               f"(abi {described['abi']}, {len(bytes_)} bytes)")
 
     if not versions:
         raise Failed("lists no releases")
 
+    # Every version the index published for this plugin is still listed. A
+    # `[[release]]` somebody deleted is a version that vanishes from the list
+    # while its artifact stays in the release — and vanishing is not what
+    # taking a version back means here: `yanked` is, and it leaves a sentence
+    # for whoever is running it.
+    listed = {version["version"] for version in versions}
+    for (published_id, version) in published_versions:
+        if published_id == plugin_id and version not in listed:
+            raise Failed(
+                f"no longer lists {version}, which is published. A version that is out there is "
+                "withdrawn with `yanked = \"why\"`, which says something to whoever is running "
+                "it; deleting the release says nothing to anybody."
+            )
+
+    # The newest version this run *built*, by the same comparison the terminal
+    # uses to decide which one to offer — not the last one in file order.
+    newest = max(built, key=_key, default=None)
+    named = built.get(newest) if newest else None
+
     # A plugin whose every version was carried over built nothing, so what it
-    # is *called* comes from the index that carried them.
+    # is called comes from the index that carried them.
     if named is None:
         named = published.get(plugin_id)
     if named is None:
