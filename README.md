@@ -42,6 +42,8 @@ the sentence a permission dialog says, and until somebody answers it reaches non
 
 - **Every artifact is built here, from the commit in the plugin's `plugin.toml`.** A pull
   request contains no binaries; if it did, a reviewer would be approving bytes nobody read.
+  Building and publishing are separate jobs: the one that runs a stranger's `build.rs` has a
+  read-only token and nothing to publish with, and the one that publishes runs no plugin code.
 - **The description is the module's own.** The id, the version, the ABI and the capability list
   in the index are read out of the built artifact by `crook-plugin-info`, which is Crook's own
   reader — the same code the terminal decides with. A `plugin.toml` whose id disagrees with the

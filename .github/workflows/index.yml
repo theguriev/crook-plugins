@@ -7,9 +7,11 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # One publish at a time, and the last push is the one anybody reads.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A pull request's last push is the only one anybody reads. A publish is
+  # not: cancelling one half way through leaves a release whose files were
+  # written by two different runs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,15 +21,25 @@ permissions:
 
 jobs:
   build:
-    name: Build every plugin and write the index
+    name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # The publish step below rewrites one release in place; nothing else here
-    # writes anything.
+    # This job runs *strangers' code*. Every plugin it builds brings its own
+    # `build.rs` and its own proc macros, and both run on this machine with
+    # whatever is on it — so what is on it is: no token that can write
+    # anything, and no checkout credentials left behind in `.git/config` for
+    # one of them to find. What it produces is an artifact, and the job below
+    # is the only thing that can publish one.
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The default is to leave the job's token in `.git/config`, where a
+          # build script could read it. Nothing here pushes.
+          persist-credentials: false
+          # Enough history to see what a pull request changed.
+          fetch-depth: 0
 
       # The wasm target for the default toolchain. Each plugin's own
       # `rust-toolchain.toml` may name another one, and `tools/index.py` adds
@@ -45,17 +57,57 @@ jobs:
       - name: Install crook-plugin-info
         run: cargo install crook_wasm --version '^0.8' --locked
 
-      - name: Build the index
+      # A pull request builds what it changed and nothing else. Forty-five
+      # minutes to review a line of README is forty-five minutes nobody spends
+      # twice, and `--only` deliberately writes no index: one plugin is a
+      # build, and publishing it as a list would take every other plugin off
+      # that list.
+      - name: Build what this pull request changed
+        if: github.event_name == 'pull_request'
+        run: |
+          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
+            | sed -n 's|^plugins/\([^/]*\)/.*|\1|p' | sort -u)
+          if [ -z "$changed" ]; then
+            echo "no plugin entry changed; nothing to build"
+            exit 0
+          fi
+          for folder in $changed; do
+            id=$(sed -n 's|^id = "\(.*\)"|\1|p' "plugins/$folder/plugin.toml")
+            echo "::group::$id"
+            tools/index.py --out build --only "$id"
+            echo "::endgroup::"
+          done
+
+      - name: Build every plugin and write the index
+        if: github.event_name != 'pull_request'
         run: |
           tools/index.py --out build \
             --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/index"
 
-      # So a reviewer can see exactly what a pull request will publish before
-      # it publishes anything.
+      # What the publish job will upload, and what a reviewer can look at
+      # before it is uploaded anywhere.
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: index
           path: build/
+          retention-days: 7
+
+  publish:
+    name: Publish
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The only job with a token that can write, and the only one that runs no
+    # code it did not bring: it downloads what `build` made and uploads it.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: index
+          path: build
 
       # One release, rewritten in place, and the tag never moves: `index` is
       # the URL every Crook reads, so it is the one thing here that has to be
@@ -63,8 +115,11 @@ jobs:
       # be a repository with a workflow in it and nothing else configured —
       # somebody forking this to run their own list changes one line in their
       # Crook, not a site setting.
+      #
+      # The artifacts go up *before* the index, and that order is the whole of
+      # what keeps a half-finished publish safe: the list is the last thing to
+      # change, so it never names a file that is not there yet.
       - name: Publish
-        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -72,5 +127,7 @@ jobs:
             || gh release create index --repo "$GITHUB_REPOSITORY" \
                  --title "The current index" \
                  --notes "The list every Crook reads, and the artifacts it names."
-          gh release upload index build/index.json build/artifacts/*.wasm \
+          gh release upload index build/artifacts/*.wasm \
+            --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload index build/index.json \
             --repo "$GITHUB_REPOSITORY" --clobber

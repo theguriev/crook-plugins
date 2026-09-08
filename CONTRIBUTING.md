@@ -47,7 +47,15 @@ one wrong fails with a line naming it rather than with something about git.
 
 Checks out the commit, builds it with the toolchain that repository pins, runs
 `crook-plugin-info` on what came out, and refuses the lot if the module's id is not the id in
-the file. On `main` it publishes the artifact and a new `index.json`.
+the file. A pull request builds only the entries it changed; `main` builds everything.
+
+**Building and publishing are two jobs, and the split is the point.** Building runs strangers'
+code — every plugin brings its own `build.rs` and its own proc macros, and both execute on the
+runner — so that job has a read-only token, no checkout credentials left behind for one of them
+to find, and nothing to publish with. What it produces is an artifact. The second job downloads
+that artifact and uploads it, and runs no code it did not bring. It writes the `.wasm` files
+first and `index.json` last, so a publish that stops half way leaves a list that names only
+files that are already there.
 
 ## What gets a human look, every time
 
