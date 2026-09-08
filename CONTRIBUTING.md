@@ -107,6 +107,13 @@ What the hash is worth, said precisely: the bytes that arrive are the bytes CI b
 commit in this file. It is not a claim that anybody else rebuilding that commit gets the same
 bytes, and nothing here has ever said it was.
 
+## Taking one away is withdrawing it
+
+Deleting a `[[release]]` that is published is refused too, and for the same reason the rebuild
+is: the artifact stays in the release either way, so what deleting the entry actually does is
+make a version disappear from the list without telling anybody who is running it. `yanked` is
+how a version goes away, because it leaves a sentence behind.
+
 ## Withdrawing a version
 
 ```toml

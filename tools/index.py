@@ -61,6 +61,12 @@ PLUGIN_ID = re.compile(r"\A[a-z0-9_-]{1,64}/[a-z0-9_-]{1,64}\Z")
 # Lowercase hex, which is what `hashlib` writes and what the terminal compares.
 SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
 
+# What a version may be, because it becomes a filename and then a URL. The
+# terminal is deliberately relaxed about versions — it compares them and prints
+# them — but a release asset named with a `+` in it is served from a URL where
+# `+` means a space, so the store would download something that is not there.
+VERSION = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9.\-_]{0,63}\Z")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -192,6 +198,17 @@ def check(index):
                              "read is every plugin missing, not one")
 
 
+def _key(version):
+    """A version, in an order `1.10.0` sorts after `1.9.0` in.
+
+    The same rule `app/src/plugins/wasm/version.rs` follows, and for the same
+    reason: sorting these as text is the one thing that is catastrophically
+    wrong rather than merely surprising.
+    """
+    release = version.split("+")[0].split("-")[0]
+    return [int(part) if part.isdigit() else -1 for part in release.split(".")]
+
+
 class Failed(Exception):
     """Something a person has to fix in a plugin.toml or in a plugin."""
 
@@ -216,7 +233,7 @@ def one(plugin, entry, arguments, artifacts, kept, published, published_versions
         raise Failed("names no licence")
 
     versions = []
-    named = None
+    built = {}
     for release in plugin.get("release", []):
         yanked = release.get("yanked")
         if yanked is not None and (not isinstance(yanked, str) or not yanked.strip()):
@@ -261,6 +278,11 @@ def one(plugin, entry, arguments, artifacts, kept, published, published_versions
                 "artifact it went out with; a change to what it is is a new version."
             )
 
+        if not VERSION.fullmatch(described["version"]):
+            raise Failed(f"is version {described['version']!r}, which cannot be a filename and a "
+                         "URL: letters, digits, `.`, `-` and `_`, starting with a letter or a "
+                         "digit")
+
         if described["id"] != plugin_id:
             raise Failed(f"names {plugin_id} and the module at {release['ref']} "
                          f"says it is {described['id']}")
@@ -283,19 +305,40 @@ def one(plugin, entry, arguments, artifacts, kept, published, published_versions
             "ref": release["ref"],
         }
         versions.append(version)
-        # The name and the line under it live in a manifest, so they are the
-        # newest built version's rather than the TOML's: a plugin is entitled
-        # to rename itself, and a registry entry must not be able to describe
-        # one as something other than what it says it is.
-        named = described
+        # The name and the line under it live in a manifest, so they are a
+        # *version's* rather than the TOML's: a plugin is entitled to rename
+        # itself, and a registry entry must not be able to describe one as
+        # something other than what it says it is. Which version is settled
+        # after the loop, because releases are listed in whatever order
+        # somebody wrote them and carried-over ones are not built at all.
+        built[described["version"]] = described
         print(f"  {plugin_id} {described['version']} "
               f"(abi {described['abi']}, {len(bytes_)} bytes)")
 
     if not versions:
         raise Failed("lists no releases")
 
+    # Every version the index published for this plugin is still listed. A
+    # `[[release]]` somebody deleted is a version that vanishes from the list
+    # while its artifact stays in the release — and vanishing is not what
+    # taking a version back means here: `yanked` is, and it leaves a sentence
+    # for whoever is running it.
+    listed = {version["version"] for version in versions}
+    for (published_id, version) in published_versions:
+        if published_id == plugin_id and version not in listed:
+            raise Failed(
+                f"no longer lists {version}, which is published. A version that is out there is "
+                "withdrawn with `yanked = \"why\"`, which says something to whoever is running "
+                "it; deleting the release says nothing to anybody."
+            )
+
+    # The newest version this run *built*, by the same comparison the terminal
+    # uses to decide which one to offer — not the last one in file order.
+    newest = max(built, key=_key, default=None)
+    named = built.get(newest) if newest else None
+
     # A plugin whose every version was carried over built nothing, so what it
-    # is *called* comes from the index that carried them.
+    # is called comes from the index that carried them.
     if named is None:
         named = published.get(plugin_id)
     if named is None:

@@ -7,7 +7,9 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Keyed on the *publish*, not on the branch: two runs writing one release is
+  # a release written by two runs, whichever refs they came from.
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && 'publish' || github.ref }}
   # A pull request's last push is the only one anybody reads. A publish is
   # not: cancelling one half way through leaves a release whose files were
   # written by two different runs.
@@ -147,7 +149,9 @@ jobs:
   publish:
     name: Publish
     needs: build
-    if: github.event_name != 'pull_request'
+    # Main and nothing else. `workflow_dispatch` can be pointed at any branch,
+    # and the index it would write from one is the list every Crook reads.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The only job with a token that can write, and the only one that runs no
