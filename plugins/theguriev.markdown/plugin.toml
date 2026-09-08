@@ -7,4 +7,4 @@ license = "MIT"
 # Newest last. A ref is a commit rather than a tag: what is built is what is
 # indexed, and a tag can be moved.
 [[release]]
-ref = "67a4922d965a79fbfa9b53247a8fdd5735dbf7c3"
+ref = "866ea70c6ca3cd7413283670d02192318f5ceaa6"
