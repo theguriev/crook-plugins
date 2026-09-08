@@ -1,5 +1,9 @@
 # Adding a plugin
 
+Writing one first: [crook-plugin-template](https://github.com/theguriev/crook-plugin-template) is
+five exports, a manifest that asks for nothing and one shape to change, and
+`crook --dev-plugin .` runs it out of `target/` while you work on it.
+
 One plugin per pull request, one directory:
 
 ```
