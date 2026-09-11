@@ -15,9 +15,12 @@ Three rules are enforced here rather than trusted:
   produced from the commit in `plugin.toml`, so a person installing from the
   store is running bytes that came out of source a reviewer could read.
 * **The module says what it is.** The id, version, ABI and capability list are
-  read out of the artifact by Crook's own reader, never from the TOML. A
-  `plugin.toml` whose `id` disagrees with the module's is a registry entry
-  pointing at the wrong repository, and it fails the build.
+  read out of the artifact by Crook's own reader, never from the TOML. So are
+  its icon and its previews, which are inside the module too —
+  `crook_plugin_api::icon!` and `preview!` put them there — and are read out
+  of the artifact like everything else. A `plugin.toml` whose `id` disagrees
+  with the module's is a registry entry pointing at the wrong repository, and
+  it fails the build.
 * **A version is built once.** Two releases that produce the same version are a
   mistake in the TOML rather than something to resolve quietly.
 
@@ -66,6 +69,24 @@ SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
 # them — but a release asset named with a `+` in it is served from a URL where
 # `+` means a space, so the store would download something that is not there.
 VERSION = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9.\-_]{0,63}\Z")
+
+# The picture rules, as `crook_plugin_api::pictures` states them. Whether a
+# picture *keeps* them — a square PNG, a side within range, no animation — is
+# the reader's to decide, and it refuses the module before anything here sees
+# it. What is checked here is the row: that an icon is base64 the terminal can
+# decode and no bigger than a PNG the reader would have let through, and that
+# a preview is a size the terminal can read. A row it cannot read is not one
+# plugin missing, it is the whole list.
+MAX_ICON_BYTES = 32 * 1024
+# That many bytes in padded base64: four characters for every three bytes,
+# rounded up.
+MAX_ICON_CHARS = (MAX_ICON_BYTES + 2) // 3 * 4
+MAX_PREVIEWS = 6
+MAX_PREVIEW_EDGE = 2048
+
+# Standard base64 with padding, which is what the reader writes and the one
+# alphabet the terminal decodes.
+ICON = re.compile(r"\A[A-Za-z0-9+/]+={0,2}\Z")
 
 
 def main() -> int:
@@ -181,6 +202,18 @@ def check(index):
             raise Failed(f"{plugin['id']} is in the index twice")
         seen.add(plugin["id"])
 
+        # `null` is a plugin with no icon, which every plugin published before
+        # pictures existed is, and stays until its next release.
+        icon = plugin.get("icon")
+        if icon is not None:
+            if not isinstance(icon, str) or not ICON.fullmatch(icon):
+                raise Failed(f"{plugin['id']} has an icon that is not base64, which is the one "
+                             "form the terminal decodes")
+            if len(icon) > MAX_ICON_CHARS:
+                raise Failed(f"{plugin['id']} has an icon of {len(icon)} characters, and "
+                             f"{MAX_ICON_CHARS} is {MAX_ICON_BYTES // 1024} KiB of PNG, the most "
+                             "an icon may be")
+
         for version in plugin["versions"]:
             where = f"{plugin['id']} {version['version']}"
             if not version["url"].startswith("https://"):
@@ -196,6 +229,27 @@ def check(index):
                 raise Failed(f"{where} is withdrawn with {version['yanked']!r} rather than a "
                              "reason, which the terminal cannot read — and an index it cannot "
                              "read is every plugin missing, not one")
+            # Absent on a version published before pictures existed, which the
+            # terminal reads as none.
+            previews = version.get("previews", [])
+            if not isinstance(previews, list):
+                raise Failed(f"{where} has {previews!r} for previews, and previews are a list "
+                             "of sizes")
+            if len(previews) > MAX_PREVIEWS:
+                raise Failed(f"{where} names {len(previews)} previews, and a plugin has at "
+                             f"most {MAX_PREVIEWS}")
+            for preview in previews:
+                if not isinstance(preview, dict):
+                    raise Failed(f"{where} has {preview!r} for a preview, and a preview here "
+                                 "is its width and height")
+                for side in ("width", "height"):
+                    edge = preview.get(side)
+                    # `type` rather than `isinstance`: a bool is an int to
+                    # Python and `true` to the terminal, which reads no size
+                    # from it.
+                    if type(edge) is not int or not 1 <= edge <= MAX_PREVIEW_EDGE:
+                        raise Failed(f"{where} has a preview {side} of {edge!r}, and a side "
+                                     f"is a whole number from 1 to {MAX_PREVIEW_EDGE}")
 
 
 def _key(version):
@@ -233,6 +287,9 @@ def one(plugin, entry, arguments, artifacts, kept, published, published_versions
         raise Failed("names no licence")
 
     versions = []
+    # What this run built, described, by version — and never the module
+    # itself, which is a path: rebinding this to one is how every new release
+    # once failed on its first subscript.
     built = {}
     for release in plugin.get("release", []):
         yanked = release.get("yanked")
@@ -264,8 +321,8 @@ def one(plugin, entry, arguments, artifacts, kept, published, published_versions
             print(f"  {plugin_id} {carried['version']} (published already)")
             continue
 
-        built = build(plugin, release, arguments)
-        described = describe(built, arguments.reader)
+        module = build(plugin, release, arguments)
+        described = describe(module, arguments.reader)
 
         # Built, and it turns out to be a version that is already published
         # from a *different* commit — which is what editing a `ref` does. The
@@ -290,7 +347,7 @@ def one(plugin, entry, arguments, artifacts, kept, published, published_versions
             raise Failed(f"has {described['version']} twice")
 
         name = f"{plugin_id.replace('/', '.')}-{described['version']}.wasm"
-        shutil.copyfile(built, artifacts / name)
+        shutil.copyfile(module, artifacts / name)
         bytes_ = (artifacts / name).read_bytes()
 
         version = {
@@ -303,6 +360,11 @@ def one(plugin, entry, arguments, artifacts, kept, published, published_versions
             "asks": described["asks"],
             "yanked": release.get("yanked"),
             "ref": release["ref"],
+            # The sizes only: the pictures themselves are inside the module,
+            # and a person sees them by fetching it. `get`, because a reader
+            # from before pictures prints no such key and an index it builds
+            # is still an index.
+            "previews": described.get("previews", []),
         }
         versions.append(version)
         # The name and the line under it live in a manifest, so they are a
@@ -348,6 +410,10 @@ def one(plugin, entry, arguments, artifacts, kept, published, published_versions
         "id": plugin_id,
         "name": named["name"],
         "description": named["description"],
+        # The plugin's face, beside its name, so the list draws it without a
+        # second request. `null` when the newest version carries none — or
+        # was described by a reader that could not see one.
+        "icon": named.get("icon"),
         "repository": plugin.get("repository", ""),
         "license": plugin.get("license", ""),
         "versions": versions,
