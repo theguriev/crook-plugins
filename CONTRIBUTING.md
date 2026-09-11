@@ -27,6 +27,9 @@ That is the whole file, and everything not in it is on purpose. The name, the de
 version, the ABI and the list of what the plugin asks to be allowed to do are read out of the
 **artifact** by Crook's own reader — so there is nothing here to keep in step with the plugin,
 and nothing a registry entry can say about a plugin that the plugin does not say about itself.
+That includes its icon and its previews, which are inside the module too —
+`crook_plugin_api::icon!` and `preview!` put them there — and are read out of the artifact like
+everything else.
 
 Every one of those is checked before anything is cloned or built, so a pull request that gets
 one wrong fails with a line naming it rather than with something about git.
