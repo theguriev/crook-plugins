@@ -1,0 +1,111 @@
+#!/bin/sh
+#
+# Cut a release of the registry itself: write its changelog, commit, tag.
+#
+#   ./script/release 0.2.0                  # everything below, leaving the tag unpushed
+#   ./script/release 0.2.0 --push           # and push main with the tag, which starts release.yml
+#   ./script/release 0.2.0 --dry-run        # print the changelog it would write and stop
+#   ./script/release 0.2.0 --allow-untyped  # release over commits the changelog cannot list
+#
+# There is no manifest here to bump: what this repository publishes is the
+# `index` release, rewritten in place by index.yml on every push to main, and
+# the plugins it names carry their own versions. A v* tag is about *this* list
+# and the script that builds it — what was added, what was withdrawn, what the
+# index promises differently than it did before — so that somebody who reads
+# the registry's history has one to read.
+#
+# So one release is: the tree is clean, on main, the version is newer than the
+# last tag, changelogen prepends a `## vX.Y.Z` section to CHANGELOG.md from the
+# commits since the previous tag, one `chore(release): vX.Y.Z` commit, and an
+# annotated tag on it. release.yml turns that section into a release page,
+# through script/release-notes, and touches neither the index nor its
+# artifacts.
+#
+# The generator reads only Conventional Commit titles and drops the rest
+# without a word, which is what --allow-untyped acknowledges — the first
+# release after this script arrives needs it, since the history behind it
+# predates the convention.
+#
+# changelogen is pinned rather than @latest: notes should not change shape
+# because a generator release happened in between. Node is the only thing it
+# needs; there is no package.json here and there will not be one.
+set -eu
+
+CHANGELOGEN="changelogen@0.6.2"
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+cd "$here"
+
+version=${1:-}
+case "$version" in
+  [0-9]*.[0-9]*.[0-9]*) ;;
+  *) echo "usage: script/release X.Y.Z [--push] [--dry-run] [--allow-untyped]" >&2; exit 2 ;;
+esac
+shift
+push=; dry=; allow_untyped=
+for arg in "$@"; do
+  case "$arg" in
+    --push) push=1 ;;
+    --dry-run) dry=1 ;;
+    --allow-untyped) allow_untyped=1 ;;
+    *) echo "release: unknown option $arg" >&2; exit 2 ;;
+  esac
+done
+tag="v$version"
+
+fail() { echo "release: $1" >&2; exit 1; }
+
+command -v npx >/dev/null || fail "node is needed to run changelogen — https://nodejs.org"
+[ "$(git branch --show-current)" = main ] || fail "release from main, not $(git branch --show-current)"
+[ -z "$(git status --porcelain)" ] || fail "the tree is not clean"
+git rev-parse -q --verify "refs/tags/$tag" >/dev/null && fail "$tag already exists"
+
+# The previous release is the newest v* tag; `index` is a moving tag on the
+# published list and is never one of these, which is why the pattern is
+# matched rather than "the latest tag" left to the generator.
+previous=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -1)
+if [ -n "$previous" ]; then
+  from=$previous
+  newest=$(printf '%s\n%s\n' "${previous#v}" "$version" | sort -V | tail -1)
+  [ "$newest" = "$version" ] && [ "$version" != "${previous#v}" ] \
+    || fail "$version is not newer than $previous"
+else
+  from=$(git rev-list --max-parents=0 HEAD | tail -1)
+  echo "==> no v* tag yet; the changelog starts at the root commit"
+fi
+range="$from..HEAD"
+[ "$(git rev-list --count "$range")" -gt 0 ] || fail "nothing since $from"
+
+echo "==> $from → $tag, $(git rev-list --count "$range") commits"
+
+if ! ./script/commit-lint "$range"; then
+  if [ -n "$allow_untyped" ]; then
+    echo "==> --allow-untyped: the titles above will be missing from the notes"
+  else
+    fail "those would be dropped from the changelog; fix the titles or pass --allow-untyped"
+  fi
+fi
+
+if [ -n "$dry" ]; then
+  echo "==> The changelog section, not written:"
+  npx --yes "$CHANGELOGEN" --from "$from" --to HEAD -r "$version" --no-output
+  exit 0
+fi
+
+echo "==> Writing CHANGELOG.md"
+npx --yes "$CHANGELOGEN" --from "$from" --to HEAD -r "$version" --output CHANGELOG.md >/dev/null
+grep -q "^## $tag" CHANGELOG.md || fail "changelogen wrote no '## $tag' section"
+
+git add CHANGELOG.md
+git commit -q -m "chore(release): $tag"
+git tag -a "$tag" -m "$tag"
+echo "==> Committed and tagged $tag"
+./script/release-notes "$tag"
+
+if [ -n "$push" ]; then
+  echo "==> Pushing main and $tag"
+  git push origin main "$tag"
+  echo "==> release.yml is writing https://github.com/theguriev/crook-plugins/releases/tag/$tag"
+else
+  echo "==> Not pushed. When it looks right:  git push origin main $tag"
+fi
