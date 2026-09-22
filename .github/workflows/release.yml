@@ -1,0 +1,65 @@
+name: Release
+
+# A v* tag is a release of this list itself: what it added, what was withdrawn,
+# what the index promises differently than it did before. The `index` release
+# is a different thing entirely — index.yml rewrites it on every push to main,
+# its tag never moves, and nothing here touches it or the artifacts it names.
+#
+#   ./script/release 0.2.0 --push
+#
+# workflow_dispatch is for the rerun case: a page that failed to write on a
+# runner's bad day should not need a new version number to try again. It takes
+# the tag to publish, and the tag has to exist.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (e.g. v0.2.0)"
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Publish the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # The one thing this workflow does is create a release page; nothing here
+      # builds a plugin, so nothing here runs a stranger's code.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          # Every commit and every tag: the notes are read out of CHANGELOG.md,
+          # and a tag made by hand has no section there — then
+          # script/release-notes walks back to the previous tag to write one,
+          # which a shallow checkout has nothing to walk.
+          fetch-depth: 0
+
+      - name: The release notes
+        run: ./script/release-notes "${{ inputs.tag || github.ref_name }}" > changes.md
+
+      # --verify-tag refuses to invent a tag: a dispatch with a typo should
+      # fail rather than create v0.20 out of nothing.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "==> $TAG has a release already; rewriting its notes"
+            gh release edit "$TAG" --notes-file changes.md
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file changes.md --verify-tag
+          fi

@@ -47,6 +47,14 @@ one wrong fails with a line naming it rather than with something about git.
   kinds of thing there than anybody means: `ext::` runs a command, a path clones a directory on
   the runner, and a tag can be moved after somebody has reviewed what it pointed at.
 
+## Commit titles
+
+Every commit a pull request brings, and the pull request's own title, is a [Conventional
+Commit](https://www.conventionalcommits.org/en/v1.0.0/) — `feat(chips): add theguriev/chips`,
+`fix: correct the ref`. `commits.yml` checks them in seconds, before anything is built, because
+this list's own releases are written from those titles and the generator drops every other
+shape without a word. The types are the keys under `types` in `changelog.config.json`.
+
 ## What CI does with it
 
 Checks out the commit, builds it with the toolchain that repository pins, runs

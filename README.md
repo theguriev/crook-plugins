@@ -87,3 +87,27 @@ again — which is what CI does, and why an ordinary push rebuilds nothing.
 
 Trying a `plugin.toml` before pushing it is `--only <id>`, which builds that one entry and
 deliberately writes no index.
+
+## Releasing this list
+
+The `index` release is not a release in the ordinary sense: `index.yml` rewrites it on every
+push to `main`, the tag never moves, and that is the point — it is the URL every Crook reads.
+So the registry's own history is a `v*` tag, cut by a script:
+
+```sh
+./script/release 0.2.0 --push
+```
+
+It writes the `## v0.2.0` section of `CHANGELOG.md` from the commit titles since the previous
+tag with [changelogen](https://github.com/unjs/changelogen), commits it as `chore(release):
+v0.2.0`, tags it and pushes. `release.yml` turns that section into a release page — what this
+list added, withdrew or now promises differently — and touches neither the index nor its
+artifacts. No manifest is bumped here: the plugins carry their own versions.
+
+Which makes commit titles the release notes, so they are [Conventional
+Commits](https://www.conventionalcommits.org/en/v1.0.0/) — the types are the keys under
+`types` in `changelog.config.json`. A title in any other shape is dropped by the generator
+without a word, so it is refused where it is still easy to fix: `git config core.hooksPath
+script/hooks` installs the hook, and `commits.yml` runs the same check on every pull request.
+The history before this predates the convention, so the first release over it needs
+`--allow-untyped`.
