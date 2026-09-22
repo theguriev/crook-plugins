@@ -43,6 +43,16 @@ jobs:
           # Enough history to see what a pull request changed.
           fetch-depth: 0
 
+      # The script's own tests, before a toolchain is installed for it: they
+      # stand in for the build and run in under a second, so a change to
+      # `tools/index.py` is found out on the pull request that makes it and
+      # not on the first release that reaches the line it broke. On every
+      # event, not only a pull request: the publish is the one run that
+      # writes the index every Crook reads, and it is the run least worth
+      # saving a second on.
+      - name: Test the index script
+        run: python3 -m unittest discover -s tools -v
+
       # The wasm target for the default toolchain. Each plugin's own
       # `rust-toolchain.toml` may name another one, and `tools/index.py` adds
       # the target again inside each checkout for exactly that reason.

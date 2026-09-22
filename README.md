@@ -46,8 +46,9 @@ the sentence a permission dialog says, and until somebody answers it reaches non
   read-only token and nothing to publish with, and the one that publishes runs no plugin code.
 - **The description is the module's own.** The id, the version, the ABI and the capability list
   in the index are read out of the built artifact by `crook-plugin-info`, which is Crook's own
-  reader — the same code the terminal decides with. A `plugin.toml` whose id disagrees with the
-  module's fails the build.
+  reader — the same code the terminal decides with. So is the picture: the icon on a row comes
+  with the list, the previews come with the module, and both are read out of the artifact. A
+  `plugin.toml` whose id disagrees with the module's fails the build.
 - **The index is checked against what the terminal reads.** A row whose id the host cannot
   parse, a hash it cannot compare, a URL it will not fetch: each of those is a plugin quietly
   missing from somebody's list, so the build refuses rather than publishing it.
