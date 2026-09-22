@@ -8,3 +8,6 @@ license = "MIT"
 # indexed, and a tag can be moved.
 [[release]]
 ref = "f29ff89361d42f9a6a25dc25d117884edb3bad0c"
+
+[[release]]
+ref = "a65c36a22e5bee597325e39e5f3e67f081bbb634"
