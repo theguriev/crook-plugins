@@ -13,6 +13,7 @@ the version row, the plugin row, the carry-over, and `check()`.
 
 import argparse
 import contextlib
+import functools
 import hashlib
 import io
 import json
@@ -207,6 +208,17 @@ class ANewRelease(Scratch):
         self.assertEqual([version["version"] for version in plugin["versions"]],
                          ["0.10.0", "0.9.0"])
 
+    def test_a_release_names_the_plugin_over_its_own_pre_release(self):
+        # The terminal offers 1.0.0 over 1.0.0-rc.1, so the name above it is
+        # 1.0.0's. The comparison here used to drop the pre-release and tie
+        # the two, and `max` then took whichever the file listed first.
+        answers = {OLDER: line("1.0.0", icon="cmVsZWFzZQ=="), NEWER: line("1.0.0-rc.1")}
+        with mock.patch.object(index, "build", builds(answers)):
+            plugin = self.one(entry([{"ref": NEWER}, {"ref": OLDER}]))
+
+        self.assertEqual(plugin["name"], "Hello 1.0.0")
+        self.assertEqual(plugin["icon"], "cmVsZWFzZQ==")
+
     def test_described_by_a_reader_without_pictures_still_indexes(self):
         # A reader from before pictures prints neither key; the index it
         # builds is one the terminal reads, with nothing to draw.
@@ -224,6 +236,42 @@ class ANewRelease(Scratch):
         with mock.patch.object(index, "build", builds({OLDER: refused})):
             with self.assertRaisesRegex(index.Failed, "could not be read: crook.icon is 300×200"):
                 self.one(entry([{"ref": OLDER}]))
+
+
+class Compare(unittest.TestCase):
+    """The order the terminal puts versions in, case for case.
+
+    The cases are `app/src/plugins/wasm/version_tests.rs`'s: the name, the
+    description and the icon in the index follow the version the terminal
+    will offer, so the two cannot be allowed to disagree about which that is.
+    """
+
+    def newest(self, *versions):
+        return max(versions, key=functools.cmp_to_key(index.compare))
+
+    def test_numbers_are_numbers(self):
+        self.assertEqual(self.newest("1.9.0", "1.10.0"), "1.10.0")
+        self.assertEqual(self.newest("0.2.0", "0.10.0", "0.9.9"), "0.10.0")
+
+    def test_a_release_outranks_its_own_pre_releases_and_no_other(self):
+        self.assertEqual(self.newest("1.0.0", "1.0.0-rc.2"), "1.0.0")
+        self.assertEqual(self.newest("1.0.0-rc.2", "1.0.0"), "1.0.0")
+        self.assertEqual(self.newest("1.0.0-rc.1", "1.0.0-rc.2"), "1.0.0-rc.2")
+        self.assertEqual(self.newest("1.0.0", "1.1.0-alpha"), "1.1.0-alpha")
+
+    def test_a_missing_part_is_a_zero(self):
+        self.assertEqual(index.compare("1.2", "1.2.0"), 0)
+        self.assertLess(index.compare("1.2", "1.2.1"), 0)
+
+    def test_build_metadata_is_ignored(self):
+        self.assertEqual(index.compare("1.0.0+build.7", "1.0.0"), 0)
+        # The `-` after a `+` is metadata, not a pre-release.
+        self.assertGreater(index.compare("1.0.0+a-b", "1.0.0-rc.1"), 0)
+
+    def test_words_lose_to_numbers_and_compare_as_text(self):
+        self.assertEqual(self.newest("nightly", "stable"), "stable")
+        self.assertEqual(self.newest("nightly", "0.1.0"), "0.1.0")
+        self.assertEqual(index.compare("what", "what"), 0)
 
 
 class ACarriedPlugin(Scratch):
