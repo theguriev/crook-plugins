@@ -31,6 +31,7 @@ could act on.
 """
 
 import argparse
+import functools
 import hashlib
 import json
 import re
@@ -252,15 +253,67 @@ def check(index):
                                      f"is a whole number from 1 to {MAX_PREVIEW_EDGE}")
 
 
-def _key(version):
-    """A version, in an order `1.10.0` sorts after `1.9.0` in.
+def compare(left, right):
+    """Which of two versions is newer: negative, zero or positive, newest last.
 
-    The same rule `app/src/plugins/wasm/version.rs` follows, and for the same
-    reason: sorting these as text is the one thing that is catastrophically
-    wrong rather than merely surprising.
+    `app/src/plugins/wasm/version.rs`, line for line, because the terminal is
+    what decides which version to offer and the name above it has to be that
+    one's. Sorting these as text is the one thing that is catastrophically
+    wrong — `1.10.0` is newer than `1.9.0` — and the rest is the same few
+    rules:
+
+    * A `-` starts a pre-release, and `1.0.0-rc.1` is older than `1.0.0`.
+    * Everything before it is split on `.`; two parts that are both numbers
+      compare as numbers, a number outranks a word, and two words compare as
+      text.
+    * A missing part is a zero, so `1.2` and `1.2.0` are one version.
+    * Build metadata (`+something`) is ignored.
     """
-    release = version.split("+")[0].split("-")[0]
-    return [int(part) if part.isdigit() else -1 for part in release.split(".")]
+    left, left_pre = _split(left)
+    right, right_pre = _split(right)
+
+    ordering = _numbers(left, right)
+    if ordering:
+        return ordering
+    if left_pre is None and right_pre is None:
+        return 0
+    # A release outranks its own pre-releases.
+    if left_pre is None:
+        return 1
+    if right_pre is None:
+        return -1
+    return _numbers(left_pre, right_pre)
+
+
+def _split(version):
+    """The version proper, and its pre-release if it has one."""
+    # Metadata first: `1.0.0+build-7` has no pre-release.
+    version = version.split("+")[0]
+    release, dash, pre = version.partition("-")
+    return release, (pre if dash else None)
+
+
+def _numbers(left, right):
+    """Two dot-separated lists, compared part by part."""
+    left, right = left.split("."), right.split(".")
+    for at in range(max(len(left), len(right))):
+        mine = left[at] if at < len(left) else "0"
+        theirs = right[at] if at < len(right) else "0"
+        # What the terminal's `u64` parse takes: ASCII digits. `int()` alone
+        # would also take spaces, `_` and other scripts' digits.
+        mine_number = mine.isascii() and mine.isdecimal()
+        theirs_number = theirs.isascii() and theirs.isdecimal()
+        if mine_number and theirs_number:
+            ordering = (int(mine) > int(theirs)) - (int(mine) < int(theirs))
+        elif mine_number:
+            ordering = 1
+        elif theirs_number:
+            ordering = -1
+        else:
+            ordering = (mine > theirs) - (mine < theirs)
+        if ordering:
+            return ordering
+    return 0
 
 
 class Failed(Exception):
@@ -396,7 +449,7 @@ def one(plugin, entry, arguments, artifacts, kept, published, published_versions
 
     # The newest version this run *built*, by the same comparison the terminal
     # uses to decide which one to offer — not the last one in file order.
-    newest = max(built, key=_key, default=None)
+    newest = max(built, key=functools.cmp_to_key(compare), default=None)
     named = built.get(newest) if newest else None
 
     # A plugin whose every version was carried over built nothing, so what it
