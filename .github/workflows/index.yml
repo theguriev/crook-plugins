@@ -69,11 +69,50 @@ jobs:
       - name: Install crook-plugin-info
         run: cargo install crook_wasm --version '^0.8' --locked
 
+      # What is out there already — for a pull request as well as for main,
+      # so that a pull request editing a published `ref` or deleting a
+      # published release is refused *there*, while it can still be changed,
+      # rather than failing the publish on main after it is merged. A version
+      # anybody could have installed keeps the artifact and the hash it went
+      # out with — two builds of one commit on different toolchain patch
+      # versions produce different modules, so a rebuild is a new artifact
+      # under an old version's name, not the same thing again. Missing,
+      # unreadable or a 404 means the registry has published nothing yet and
+      # everything is built.
+      - name: What is already published
+        run: |
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/index/index.json"
+          code=$(curl --silent --location --output published.json --write-out '%{http_code}' "$url")
+          case "$code" in
+            200)
+              # Refuse an index that is not one *here*, rather than carrying
+              # nothing over and rebuilding everything as if the registry had
+              # published nothing.
+              python3 -c "import json,sys; json.load(open('published.json'))"
+              echo "carrying over what is in the published index"
+              ;;
+            404)
+              # The registry has published nothing yet, which is true exactly
+              # once and is the only reason to build everything.
+              rm -f published.json
+              echo "nothing published yet"
+              ;;
+            *)
+              # Anything else is the network, and failing *open* here would
+              # rebuild every published version and clobber the release with
+              # artifacts that hash differently. A run that cannot read the
+              # index does not get to replace it.
+              echo "::error::the published index answered $code; refusing to rebuild what is out there"
+              exit 1
+              ;;
+          esac
+
       # A pull request builds what it changed and nothing else. Forty-five
       # minutes to review a line of README is forty-five minutes nobody spends
       # twice, and `--only` deliberately writes no index: one plugin is a
       # build, and publishing it as a list would take every other plugin off
-      # that list.
+      # that list. `--keep`, so that what is published is carried rather than
+      # rebuilt and a change to it is refused here, as it would be on main.
       - name: Build what this pull request changed
         if: github.event_name == 'pull_request'
         run: |
@@ -102,44 +141,9 @@ jobs:
           import sys, tomllib
           print(tomllib.load(open('plugins/$folder/plugin.toml','rb'))['id'])")
             echo "::group::$id"
-            tools/index.py --out build --only "$id"
+            tools/index.py --out build --only "$id" --keep published.json
             echo "::endgroup::"
           done
-
-      # What is out there already. A version anybody could have installed keeps
-      # the artifact and the hash it went out with — two builds of one commit
-      # on different toolchain patch versions produce different modules, so a
-      # rebuild is a new artifact under an old version's name, not the same
-      # thing again. Missing, unreadable or a 404 means the registry has
-      # published nothing yet and everything is built.
-      - name: What is already published
-        if: github.event_name != 'pull_request'
-        run: |
-          url="https://github.com/$GITHUB_REPOSITORY/releases/download/index/index.json"
-          code=$(curl --silent --location --output published.json --write-out '%{http_code}' "$url")
-          case "$code" in
-            200)
-              # Refuse an index that is not one *here*, rather than carrying
-              # nothing over and rebuilding everything as if the registry had
-              # published nothing.
-              python3 -c "import json,sys; json.load(open('published.json'))"
-              echo "carrying over what is in the published index"
-              ;;
-            404)
-              # The registry has published nothing yet, which is true exactly
-              # once and is the only reason to build everything.
-              rm -f published.json
-              echo "nothing published yet"
-              ;;
-            *)
-              # Anything else is the network, and failing *open* here would
-              # rebuild every published version and clobber the release with
-              # artifacts that hash differently. A run that cannot read the
-              # index does not get to replace it.
-              echo "::error::the published index answered $code; refusing to rebuild what is out there"
-              exit 1
-              ;;
-          esac
 
       - name: Build what is new and write the index
         if: github.event_name != 'pull_request'
