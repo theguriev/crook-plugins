@@ -333,27 +333,44 @@ def one(plugin, entry, arguments, artifacts, kept, published, published_versions
                      f"{plugin_id.replace('/', '.')}")
 
     repository = plugin.get("repository", "")
-    if not REPOSITORY.fullmatch(repository):
+    if not isinstance(repository, str) or not REPOSITORY.fullmatch(repository):
         raise Failed(f"points at {repository!r}, and a repository here is "
                      "https://github.com/<owner>/<name>")
     if not plugin.get("license"):
         raise Failed("names no licence")
 
-    versions = []
-    # What this run built, described, by version — and never the module
-    # itself, which is a path: rebinding this to one is how every new release
-    # once failed on its first subscript.
-    built = {}
-    for release in plugin.get("release", []):
+    # Every release checked before any is built, which is what CONTRIBUTING
+    # promises: a pull request that gets one wrong fails with a line naming
+    # it. Checked inside the build loop, a bad second release was found only
+    # after the first had been cloned and compiled — and a value of the wrong
+    # *type* was not found at all, but crashed the run with a traceback.
+    releases = plugin.get("release", [])
+    if not isinstance(releases, list) or not all(isinstance(release, dict) for release in releases):
+        raise Failed("writes `release` as something other than a list of `[[release]]` tables")
+    refs = set()
+    for release in releases:
         yanked = release.get("yanked")
         if yanked is not None and (not isinstance(yanked, str) or not yanked.strip()):
             raise Failed(f"withdraws a release with {yanked!r}, and a withdrawal is a *sentence*: "
                          "it is what somebody already running that version is told")
 
         ref = release.get("ref", "")
-        if not COMMIT.fullmatch(ref):
+        if not isinstance(ref, str) or not COMMIT.fullmatch(ref):
             raise Failed(f"lists {ref!r}, and a release here is a 40-character commit: what is "
                          "built is what is indexed, and a tag can be moved after it is reviewed")
+        # One commit is one version. Twice, a published one was carried over
+        # twice and the index listed the same version two times.
+        if ref in refs:
+            raise Failed(f"lists {ref} twice")
+        refs.add(ref)
+
+    versions = []
+    # What this run built, described, by version — and never the module
+    # itself, which is a path: rebinding this to one is how every new release
+    # once failed on its first subscript.
+    built = {}
+    for release in releases:
+        ref = release["ref"]
 
         # Already out there, so it is carried over rather than built: the
         # artifact and the hash it went out with are what somebody may already

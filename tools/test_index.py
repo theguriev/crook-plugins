@@ -274,6 +274,42 @@ class Compare(unittest.TestCase):
         self.assertEqual(index.compare("what", "what"), 0)
 
 
+class AMalformedEntry(Scratch):
+    """A `plugin.toml` that is wrong, which fails with a line before anything is built."""
+
+    def test_fails_with_a_line_rather_than_a_traceback(self):
+        # A value of the wrong type used to reach a regex or a `.get` and
+        # crash the run, and `main` catches only `Failed`.
+        cases = {
+            "[release] written for [[release]]":
+                (dict(entry([]), release={"ref": OLDER}), "list of `\\[\\[release\\]\\]`"),
+            "a release that is not a table": (entry([OLDER]), "list of"),
+            "a repository that is not a string": (dict(entry([]), repository=5), "points at 5"),
+            "a ref that is not a string": (entry([{"ref": 5}]), "lists 5"),
+        }
+        for what, (plugin, why) in cases.items():
+            with self.subTest(what), mock.patch.object(index, "build", never_builds):
+                with self.assertRaisesRegex(index.Failed, why):
+                    self.one(plugin)
+
+    def test_every_release_is_checked_before_the_first_is_built(self):
+        # A bad second release was found only after the first had been
+        # cloned and compiled.
+        with mock.patch.object(index, "build", never_builds):
+            with self.assertRaisesRegex(index.Failed, "lists 'v1.0'"):
+                self.one(entry([{"ref": OLDER}, {"ref": "v1.0"}]))
+
+    def test_one_commit_listed_twice_is_refused(self):
+        # Carried over from the published index, the same commit twice was
+        # the same version listed twice in index.json.
+        published = listed(versions=[row()])
+        kept = {("you/hello", OLDER): published["versions"][0]}
+        with mock.patch.object(index, "build", never_builds):
+            with self.assertRaisesRegex(index.Failed, f"lists {OLDER} twice"):
+                self.one(entry([{"ref": OLDER}, {"ref": OLDER}]), kept,
+                         {"you/hello": published}, {("you/hello", "0.1.0")})
+
+
 class ACarriedPlugin(Scratch):
     """A plugin whose every version the published index already holds."""
 
