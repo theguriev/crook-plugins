@@ -361,6 +361,23 @@ class ACarriedPlugin(Scratch):
                          ["0.1.0", "0.2.0"])
 
 
+    def test_a_backport_does_not_rename_the_plugin_after_itself(self):
+        # 2.0.0 is out; 1.0.1, for terminals on the older ABI, is added after
+        # it and is the only thing this run builds. The plugin is still the
+        # newest version's — 2.0.0's name, description and icon — rather than
+        # the one that happened to be built.
+        published = listed(icon="bmV3ZXI=", name="Hello 2.0.0",
+                           versions=[row(version="2.0.0", ref=OLDER)])
+        kept = {("you/hello", OLDER): published["versions"][0]}
+
+        with mock.patch.object(index, "build", builds({NEWER: line("1.0.1", icon="b2xkZXI=")})):
+            plugin = self.one(entry([{"ref": OLDER}, {"ref": NEWER}]), kept,
+                              {"you/hello": published}, {("you/hello", "2.0.0")})
+
+        self.assertEqual((plugin["name"], plugin["icon"]), ("Hello 2.0.0", "bmV3ZXI="))
+        self.assertEqual([version["version"] for version in plugin["versions"]],
+                         ["2.0.0", "1.0.1"])
+
 class Check(unittest.TestCase):
     """What `check()` lets through, and what it stops."""
 

@@ -464,13 +464,18 @@ def one(plugin, entry, arguments, artifacts, kept, published, published_versions
                 "it; deleting the release says nothing to anybody."
             )
 
-    # The newest version this run *built*, by the same comparison the terminal
-    # uses to decide which one to offer — not the last one in file order.
-    newest = max(built, key=functools.cmp_to_key(compare), default=None)
-    named = built.get(newest) if newest else None
+    # The newest version listed, built or carried over, by the same comparison
+    # the terminal uses to decide which one to offer — not the last one in
+    # file order, and not the newest this run happened to build. A backport
+    # (a 1.0.1 for older terminals, added after 2.0.0 is out) is the only
+    # thing a run builds, and naming the plugin after it gave the whole
+    # entry 1.0.1's name, description and icon.
+    newest = max((version["version"] for version in versions), key=functools.cmp_to_key(compare))
+    named = built.get(newest)
 
-    # A plugin whose every version was carried over built nothing, so what it
-    # is called comes from the index that carried them.
+    # The newest was carried over, so what it is called comes from the index
+    # that carried it: every version that index listed is still listed (see
+    # above), so the newest it described is this one.
     if named is None:
         named = published.get(plugin_id)
     if named is None:
